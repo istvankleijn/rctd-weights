@@ -1,0 +1,662 @@
+<!DOCTYPE html>
+<html xmlns="http://www.w3.org/1999/xhtml" lang="en" xml:lang="en"><head>
+
+<meta charset="utf-8">
+<meta name="generator" content="quarto-1.3.450">
+
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=yes">
+
+<meta name="author" content="Istvan Kleijn">
+<meta name="dcterms.date" content="2024-02-26">
+
+<title>Interpreting RCTD weights</title>
+<style>
+code{white-space: pre-wrap;}
+span.smallcaps{font-variant: small-caps;}
+div.columns{display: flex; gap: min(4vw, 1.5em);}
+div.column{flex: auto; overflow-x: auto;}
+div.hanging-indent{margin-left: 1.5em; text-indent: -1.5em;}
+ul.task-list{list-style: none;}
+ul.task-list li input[type="checkbox"] {
+  width: 0.8em;
+  margin: 0 0.8em 0.2em -1em; /* quarto-specific, see https://github.com/quarto-dev/quarto-cli/issues/4556 */ 
+  vertical-align: middle;
+}
+/* CSS for syntax highlighting */
+pre > code.sourceCode { white-space: pre; position: relative; }
+pre > code.sourceCode > span { display: inline-block; line-height: 1.25; }
+pre > code.sourceCode > span:empty { height: 1.2em; }
+.sourceCode { overflow: visible; }
+code.sourceCode > span { color: inherit; text-decoration: inherit; }
+div.sourceCode { margin: 1em 0; }
+pre.sourceCode { margin: 0; }
+@media screen {
+div.sourceCode { overflow: auto; }
+}
+@media print {
+pre > code.sourceCode { white-space: pre-wrap; }
+pre > code.sourceCode > span { text-indent: -5em; padding-left: 5em; }
+}
+pre.numberSource code
+  { counter-reset: source-line 0; }
+pre.numberSource code > span
+  { position: relative; left: -4em; counter-increment: source-line; }
+pre.numberSource code > span > a:first-child::before
+  { content: counter(source-line);
+    position: relative; left: -1em; text-align: right; vertical-align: baseline;
+    border: none; display: inline-block;
+    -webkit-touch-callout: none; -webkit-user-select: none;
+    -khtml-user-select: none; -moz-user-select: none;
+    -ms-user-select: none; user-select: none;
+    padding: 0 4px; width: 4em;
+  }
+pre.numberSource { margin-left: 3em;  padding-left: 4px; }
+div.sourceCode
+  {   }
+@media screen {
+pre > code.sourceCode > span > a:first-child::before { text-decoration: underline; }
+}
+</style>
+
+
+<script src="rctd-weights_files/libs/clipboard/clipboard.min.js"></script>
+<script src="rctd-weights_files/libs/quarto-html/quarto.js"></script>
+<script src="rctd-weights_files/libs/quarto-html/popper.min.js"></script>
+<script src="rctd-weights_files/libs/quarto-html/tippy.umd.min.js"></script>
+<script src="rctd-weights_files/libs/quarto-html/anchor.min.js"></script>
+<link href="rctd-weights_files/libs/quarto-html/tippy.css" rel="stylesheet">
+<link href="rctd-weights_files/libs/quarto-html/quarto-syntax-highlighting.css" rel="stylesheet" id="quarto-text-highlighting-styles">
+<script src="rctd-weights_files/libs/bootstrap/bootstrap.min.js"></script>
+<link href="rctd-weights_files/libs/bootstrap/bootstrap-icons.css" rel="stylesheet">
+<link href="rctd-weights_files/libs/bootstrap/bootstrap.min.css" rel="stylesheet" id="quarto-bootstrap" data-mode="light">
+
+
+</head>
+
+<body class="fullcontent">
+
+<div id="quarto-content" class="page-columns page-rows-contents page-layout-article">
+
+<main class="content" id="quarto-document-content">
+
+<header id="title-block-header" class="quarto-title-block default">
+<div class="quarto-title">
+<h1 class="title">Interpreting RCTD weights</h1>
+</div>
+
+
+
+<div class="quarto-title-meta">
+
+    <div>
+    <div class="quarto-title-meta-heading">Author</div>
+    <div class="quarto-title-meta-contents">
+             <p>Istvan Kleijn </p>
+          </div>
+  </div>
+    
+    <div>
+    <div class="quarto-title-meta-heading">Published</div>
+    <div class="quarto-title-meta-contents">
+      <p class="date">February 26, 2024</p>
+    </div>
+  </div>
+  
+    
+  </div>
+  
+
+</header>
+
+<p>In this document, we run spacexr’s RCTD algorithm on simple synthetic data to infer that the <code>weights</code> matrix should be interpreted as the proportion of RNA molecules originating from each cell type in each spot, rather than the fraction of cells assigned to each cell type.</p>
+<div class="cell">
+<div class="sourceCode cell-code" id="cb1"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb1-1"><a href="#cb1-1" aria-hidden="true" tabindex="-1"></a><span class="fu">library</span>(spacexr)</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+</div>
+<section id="create-mock-cell-types" class="level3">
+<h3 class="anchored" data-anchor-id="create-mock-cell-types">Create mock cell types</h3>
+<p>As the first step, we create two mock cell types with corresponding “gene” expression. RCTD requires at least 10 differentially expressed genes. I choose to have five genes specific to each of two cell types A and B, and five constitutively expressed genes that have equal counts across each cell. Crucially, we choose cell type B to have a higher total expression than cell type A, because its markers are more highly expressed.</p>
+<div class="cell">
+<div class="sourceCode cell-code" id="cb2"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb2-1"><a href="#cb2-1" aria-hidden="true" tabindex="-1"></a>typeA <span class="ot">&lt;-</span> <span class="fu">c</span>(</span>
+<span id="cb2-2"><a href="#cb2-2" aria-hidden="true" tabindex="-1"></a>  <span class="st">"a1"</span> <span class="ot">=</span> <span class="dv">1</span>,</span>
+<span id="cb2-3"><a href="#cb2-3" aria-hidden="true" tabindex="-1"></a>  <span class="st">"a2"</span> <span class="ot">=</span> <span class="dv">2</span>,</span>
+<span id="cb2-4"><a href="#cb2-4" aria-hidden="true" tabindex="-1"></a>  <span class="st">"a3"</span> <span class="ot">=</span> <span class="dv">3</span>,</span>
+<span id="cb2-5"><a href="#cb2-5" aria-hidden="true" tabindex="-1"></a>  <span class="st">"a4"</span> <span class="ot">=</span> <span class="dv">4</span>,</span>
+<span id="cb2-6"><a href="#cb2-6" aria-hidden="true" tabindex="-1"></a>  <span class="st">"a5"</span> <span class="ot">=</span> <span class="dv">5</span>,</span>
+<span id="cb2-7"><a href="#cb2-7" aria-hidden="true" tabindex="-1"></a>  <span class="st">"b1"</span> <span class="ot">=</span> <span class="dv">0</span>,</span>
+<span id="cb2-8"><a href="#cb2-8" aria-hidden="true" tabindex="-1"></a>  <span class="st">"b2"</span> <span class="ot">=</span> <span class="dv">0</span>,</span>
+<span id="cb2-9"><a href="#cb2-9" aria-hidden="true" tabindex="-1"></a>  <span class="st">"b3"</span> <span class="ot">=</span> <span class="dv">0</span>,</span>
+<span id="cb2-10"><a href="#cb2-10" aria-hidden="true" tabindex="-1"></a>  <span class="st">"b4"</span> <span class="ot">=</span> <span class="dv">0</span>,</span>
+<span id="cb2-11"><a href="#cb2-11" aria-hidden="true" tabindex="-1"></a>  <span class="st">"b5"</span> <span class="ot">=</span> <span class="dv">0</span>,</span>
+<span id="cb2-12"><a href="#cb2-12" aria-hidden="true" tabindex="-1"></a>  <span class="st">"c1"</span> <span class="ot">=</span> <span class="dv">1</span>,</span>
+<span id="cb2-13"><a href="#cb2-13" aria-hidden="true" tabindex="-1"></a>  <span class="st">"c2"</span> <span class="ot">=</span> <span class="dv">2</span>,</span>
+<span id="cb2-14"><a href="#cb2-14" aria-hidden="true" tabindex="-1"></a>  <span class="st">"c3"</span> <span class="ot">=</span> <span class="dv">3</span>,</span>
+<span id="cb2-15"><a href="#cb2-15" aria-hidden="true" tabindex="-1"></a>  <span class="st">"c4"</span> <span class="ot">=</span> <span class="dv">4</span>,</span>
+<span id="cb2-16"><a href="#cb2-16" aria-hidden="true" tabindex="-1"></a>  <span class="st">"c5"</span> <span class="ot">=</span> <span class="dv">5</span></span>
+<span id="cb2-17"><a href="#cb2-17" aria-hidden="true" tabindex="-1"></a>)</span>
+<span id="cb2-18"><a href="#cb2-18" aria-hidden="true" tabindex="-1"></a>typeB <span class="ot">&lt;-</span> <span class="fu">c</span>(</span>
+<span id="cb2-19"><a href="#cb2-19" aria-hidden="true" tabindex="-1"></a>  <span class="st">"a1"</span> <span class="ot">=</span> <span class="dv">0</span>,</span>
+<span id="cb2-20"><a href="#cb2-20" aria-hidden="true" tabindex="-1"></a>  <span class="st">"a2"</span> <span class="ot">=</span> <span class="dv">0</span>,</span>
+<span id="cb2-21"><a href="#cb2-21" aria-hidden="true" tabindex="-1"></a>  <span class="st">"a3"</span> <span class="ot">=</span> <span class="dv">0</span>,</span>
+<span id="cb2-22"><a href="#cb2-22" aria-hidden="true" tabindex="-1"></a>  <span class="st">"a4"</span> <span class="ot">=</span> <span class="dv">0</span>,</span>
+<span id="cb2-23"><a href="#cb2-23" aria-hidden="true" tabindex="-1"></a>  <span class="st">"a5"</span> <span class="ot">=</span> <span class="dv">0</span>,</span>
+<span id="cb2-24"><a href="#cb2-24" aria-hidden="true" tabindex="-1"></a>  <span class="st">"b1"</span> <span class="ot">=</span> <span class="dv">10</span>,</span>
+<span id="cb2-25"><a href="#cb2-25" aria-hidden="true" tabindex="-1"></a>  <span class="st">"b2"</span> <span class="ot">=</span> <span class="dv">20</span>,</span>
+<span id="cb2-26"><a href="#cb2-26" aria-hidden="true" tabindex="-1"></a>  <span class="st">"b3"</span> <span class="ot">=</span> <span class="dv">30</span>,</span>
+<span id="cb2-27"><a href="#cb2-27" aria-hidden="true" tabindex="-1"></a>  <span class="st">"b4"</span> <span class="ot">=</span> <span class="dv">40</span>,</span>
+<span id="cb2-28"><a href="#cb2-28" aria-hidden="true" tabindex="-1"></a>  <span class="st">"b5"</span> <span class="ot">=</span> <span class="dv">50</span>,</span>
+<span id="cb2-29"><a href="#cb2-29" aria-hidden="true" tabindex="-1"></a>  <span class="st">"c1"</span> <span class="ot">=</span> <span class="dv">1</span>,</span>
+<span id="cb2-30"><a href="#cb2-30" aria-hidden="true" tabindex="-1"></a>  <span class="st">"c2"</span> <span class="ot">=</span> <span class="dv">2</span>,</span>
+<span id="cb2-31"><a href="#cb2-31" aria-hidden="true" tabindex="-1"></a>  <span class="st">"c3"</span> <span class="ot">=</span> <span class="dv">3</span>,</span>
+<span id="cb2-32"><a href="#cb2-32" aria-hidden="true" tabindex="-1"></a>  <span class="st">"c4"</span> <span class="ot">=</span> <span class="dv">4</span>,</span>
+<span id="cb2-33"><a href="#cb2-33" aria-hidden="true" tabindex="-1"></a>  <span class="st">"c5"</span> <span class="ot">=</span> <span class="dv">5</span></span>
+<span id="cb2-34"><a href="#cb2-34" aria-hidden="true" tabindex="-1"></a>)</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+</div>
+</section>
+<section id="create-rctd-objects" class="level3">
+<h3 class="anchored" data-anchor-id="create-rctd-objects">Create RCTD objects</h3>
+<p>First we create the RCTD reference. At some point down the line, RCTD errors with only one cell per cell type in the reference, so the reference contains two identical cells of both cell types.</p>
+<div class="cell">
+<div class="sourceCode cell-code" id="cb3"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb3-1"><a href="#cb3-1" aria-hidden="true" tabindex="-1"></a>reference_counts <span class="ot">&lt;-</span> <span class="fu">data.frame</span>(</span>
+<span id="cb3-2"><a href="#cb3-2" aria-hidden="true" tabindex="-1"></a>  <span class="at">cell1 =</span> typeA, <span class="at">cell2 =</span> typeA, <span class="at">cell3 =</span> typeB, <span class="at">cell4 =</span> typeB</span>
+<span id="cb3-3"><a href="#cb3-3" aria-hidden="true" tabindex="-1"></a>) <span class="sc">|&gt;</span></span>
+<span id="cb3-4"><a href="#cb3-4" aria-hidden="true" tabindex="-1"></a>  <span class="fu">as.matrix</span>()</span>
+<span id="cb3-5"><a href="#cb3-5" aria-hidden="true" tabindex="-1"></a>reference_types <span class="ot">&lt;-</span> <span class="fu">factor</span>(</span>
+<span id="cb3-6"><a href="#cb3-6" aria-hidden="true" tabindex="-1"></a>  <span class="fu">c</span>(</span>
+<span id="cb3-7"><a href="#cb3-7" aria-hidden="true" tabindex="-1"></a>    <span class="st">"cell1"</span> <span class="ot">=</span> <span class="st">"typeA"</span>, <span class="st">"cell2"</span> <span class="ot">=</span> <span class="st">"typeA"</span>,</span>
+<span id="cb3-8"><a href="#cb3-8" aria-hidden="true" tabindex="-1"></a>    <span class="st">"cell3"</span> <span class="ot">=</span> <span class="st">"typeB"</span>, <span class="st">"cell4"</span> <span class="ot">=</span> <span class="st">"typeB"</span></span>
+<span id="cb3-9"><a href="#cb3-9" aria-hidden="true" tabindex="-1"></a>  ),</span>
+<span id="cb3-10"><a href="#cb3-10" aria-hidden="true" tabindex="-1"></a>  <span class="at">levels =</span> <span class="fu">c</span>(<span class="st">"typeA"</span>, <span class="st">"typeB"</span>)</span>
+<span id="cb3-11"><a href="#cb3-11" aria-hidden="true" tabindex="-1"></a>)</span>
+<span id="cb3-12"><a href="#cb3-12" aria-hidden="true" tabindex="-1"></a>reference_nUMI <span class="ot">&lt;-</span> <span class="fu">colSums</span>(reference_counts)</span>
+<span id="cb3-13"><a href="#cb3-13" aria-hidden="true" tabindex="-1"></a>reference <span class="ot">&lt;-</span> spacexr<span class="sc">::</span><span class="fu">Reference</span>(</span>
+<span id="cb3-14"><a href="#cb3-14" aria-hidden="true" tabindex="-1"></a>  reference_counts,</span>
+<span id="cb3-15"><a href="#cb3-15" aria-hidden="true" tabindex="-1"></a>  reference_types,</span>
+<span id="cb3-16"><a href="#cb3-16" aria-hidden="true" tabindex="-1"></a>  reference_nUMI,</span>
+<span id="cb3-17"><a href="#cb3-17" aria-hidden="true" tabindex="-1"></a>  <span class="at">min_UMI =</span> <span class="dv">10</span></span>
+<span id="cb3-18"><a href="#cb3-18" aria-hidden="true" tabindex="-1"></a>)</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+</div>
+<p>Next, we mock up some spatial data. We let spot 1 contain 1 cell of type A and 1 cell of type B. Spot 2 contains 1 cell A and 3 cells of type B, spot 3 contains 3 cells of type A and one of type B, and spot 4 contains 3 cells of each type.</p>
+<div class="cell">
+<div class="sourceCode cell-code" id="cb4"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb4-1"><a href="#cb4-1" aria-hidden="true" tabindex="-1"></a>spatial_coords <span class="ot">&lt;-</span> tibble<span class="sc">::</span><span class="fu">tribble</span>(</span>
+<span id="cb4-2"><a href="#cb4-2" aria-hidden="true" tabindex="-1"></a>  <span class="sc">~</span>spot, <span class="sc">~</span>x, <span class="sc">~</span>y,</span>
+<span id="cb4-3"><a href="#cb4-3" aria-hidden="true" tabindex="-1"></a>  <span class="st">"spot1"</span>, <span class="dv">0</span>, <span class="dv">0</span>,</span>
+<span id="cb4-4"><a href="#cb4-4" aria-hidden="true" tabindex="-1"></a>  <span class="st">"spot2"</span>, <span class="dv">1</span>, <span class="dv">0</span>,</span>
+<span id="cb4-5"><a href="#cb4-5" aria-hidden="true" tabindex="-1"></a>  <span class="st">"spot3"</span>, <span class="dv">0</span>, <span class="dv">1</span>,</span>
+<span id="cb4-6"><a href="#cb4-6" aria-hidden="true" tabindex="-1"></a>  <span class="st">"spot4"</span>, <span class="dv">1</span>, <span class="dv">1</span></span>
+<span id="cb4-7"><a href="#cb4-7" aria-hidden="true" tabindex="-1"></a>) <span class="sc">|&gt;</span></span>
+<span id="cb4-8"><a href="#cb4-8" aria-hidden="true" tabindex="-1"></a>  tibble<span class="sc">::</span><span class="fu">column_to_rownames</span>(<span class="st">"spot"</span>)</span>
+<span id="cb4-9"><a href="#cb4-9" aria-hidden="true" tabindex="-1"></a>spatial_counts <span class="ot">&lt;-</span> <span class="fu">data.frame</span>(</span>
+<span id="cb4-10"><a href="#cb4-10" aria-hidden="true" tabindex="-1"></a>  <span class="at">spot1 =</span> typeA <span class="sc">+</span> typeB,</span>
+<span id="cb4-11"><a href="#cb4-11" aria-hidden="true" tabindex="-1"></a>  <span class="at">spot2 =</span> typeA <span class="sc">+</span> <span class="dv">3</span> <span class="sc">*</span> typeB,</span>
+<span id="cb4-12"><a href="#cb4-12" aria-hidden="true" tabindex="-1"></a>  <span class="at">spot3 =</span> <span class="dv">3</span> <span class="sc">*</span> typeA <span class="sc">+</span> typeB,</span>
+<span id="cb4-13"><a href="#cb4-13" aria-hidden="true" tabindex="-1"></a>  <span class="at">spot4 =</span> <span class="dv">3</span> <span class="sc">*</span> typeA <span class="sc">+</span> <span class="dv">3</span> <span class="sc">*</span> typeB</span>
+<span id="cb4-14"><a href="#cb4-14" aria-hidden="true" tabindex="-1"></a>) <span class="sc">|&gt;</span></span>
+<span id="cb4-15"><a href="#cb4-15" aria-hidden="true" tabindex="-1"></a>  <span class="fu">as.matrix</span>()</span>
+<span id="cb4-16"><a href="#cb4-16" aria-hidden="true" tabindex="-1"></a>nUMI <span class="ot">&lt;-</span> <span class="fu">colSums</span>(spatial_counts)</span>
+<span id="cb4-17"><a href="#cb4-17" aria-hidden="true" tabindex="-1"></a>puck <span class="ot">&lt;-</span> <span class="fu">SpatialRNA</span>(spatial_coords, spatial_counts, nUMI)</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+</div>
+<p>Finally, we create the RCTD object itself from the mock reference and spatial data. We have to provide a few parameters to enable the small size of the mock data.</p>
+<div class="cell">
+<div class="sourceCode cell-code" id="cb5"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb5-1"><a href="#cb5-1" aria-hidden="true" tabindex="-1"></a>myRCTD <span class="ot">&lt;-</span> <span class="fu">create.RCTD</span>(</span>
+<span id="cb5-2"><a href="#cb5-2" aria-hidden="true" tabindex="-1"></a>  puck, reference,</span>
+<span id="cb5-3"><a href="#cb5-3" aria-hidden="true" tabindex="-1"></a>  <span class="at">max_cores =</span> <span class="dv">1</span>,</span>
+<span id="cb5-4"><a href="#cb5-4" aria-hidden="true" tabindex="-1"></a>  <span class="at">counts_MIN =</span> <span class="dv">1</span>,</span>
+<span id="cb5-5"><a href="#cb5-5" aria-hidden="true" tabindex="-1"></a>  <span class="at">CELL_MIN_INSTANCE =</span> <span class="dv">1</span></span>
+<span id="cb5-6"><a href="#cb5-6" aria-hidden="true" tabindex="-1"></a>  )</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<div class="cell-output cell-output-stderr">
+<pre><code>Begin: process_cell_type_info</code></pre>
+</div>
+<div class="cell-output cell-output-stderr">
+<pre><code>process_cell_type_info: number of cells in reference: 4</code></pre>
+</div>
+<div class="cell-output cell-output-stderr">
+<pre><code>process_cell_type_info: number of genes in reference: 15</code></pre>
+</div>
+<div class="cell-output cell-output-stdout">
+<pre><code>
+typeA typeB 
+    2     2 </code></pre>
+</div>
+<div class="cell-output cell-output-stderr">
+<pre><code>End: process_cell_type_info</code></pre>
+</div>
+<div class="cell-output cell-output-stderr">
+<pre><code>create.RCTD: getting regression differentially expressed genes: </code></pre>
+</div>
+<div class="cell-output cell-output-stderr">
+<pre><code>get_de_genes: typeA found DE genes: 10</code></pre>
+</div>
+<div class="cell-output cell-output-stderr">
+<pre><code>get_de_genes: typeB found DE genes: 5</code></pre>
+</div>
+<div class="cell-output cell-output-stderr">
+<pre><code>get_de_genes: total DE genes: 15</code></pre>
+</div>
+<div class="cell-output cell-output-stderr">
+<pre><code>create.RCTD: getting platform effect normalization differentially expressed genes: </code></pre>
+</div>
+<div class="cell-output cell-output-stderr">
+<pre><code>get_de_genes: typeA found DE genes: 10</code></pre>
+</div>
+<div class="cell-output cell-output-stderr">
+<pre><code>get_de_genes: typeB found DE genes: 5</code></pre>
+</div>
+<div class="cell-output cell-output-stderr">
+<pre><code>get_de_genes: total DE genes: 15</code></pre>
+</div>
+</div>
+<p>Note that it finds 10 marker genes for typeA, which means that the constitutively expressed genes are included. Indeed, their <em>relative</em> abundance is higher in cell type A than in cell type B.</p>
+</section>
+<section id="run-rctd-to-find-cell-type-fractions" class="level3">
+<h3 class="anchored" data-anchor-id="run-rctd-to-find-cell-type-fractions">Run RCTD to find cell type fractions</h3>
+<p>Now we finally run the RCTD algorithm to get cell type proportions. I always use full mode on my own data so that is what I do here. For this mock data using doublet mode would be appropriate (it has the same interpretation).</p>
+<div class="cell">
+<div class="sourceCode cell-code" id="cb19"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb19-1"><a href="#cb19-1" aria-hidden="true" tabindex="-1"></a>myRCTD <span class="ot">&lt;-</span> <span class="fu">run.RCTD</span>(myRCTD, <span class="at">doublet_mode =</span> <span class="st">"full"</span>)</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<div class="cell-output cell-output-stderr">
+<pre><code>fitBulk: decomposing bulk</code></pre>
+</div>
+<div class="cell-output cell-output-stderr">
+<pre><code>chooseSigma: using initial Q_mat with sigma =  1</code></pre>
+</div>
+<div class="cell-output cell-output-stderr">
+<pre><code>Likelihood value: 113.745139064746</code></pre>
+</div>
+<div class="cell-output cell-output-stderr">
+<pre><code>Sigma value:  0.84</code></pre>
+</div>
+<div class="cell-output cell-output-stderr">
+<pre><code>Likelihood value: 109.153842621005</code></pre>
+</div>
+<div class="cell-output cell-output-stderr">
+<pre><code>Sigma value:  0.69</code></pre>
+</div>
+<div class="cell-output cell-output-stderr">
+<pre><code>Likelihood value: 104.184989239904</code></pre>
+</div>
+<div class="cell-output cell-output-stderr">
+<pre><code>Sigma value:  0.61</code></pre>
+</div>
+<div class="cell-output cell-output-stderr">
+<pre><code>Likelihood value: 101.205842339197</code></pre>
+</div>
+<div class="cell-output cell-output-stderr">
+<pre><code>Sigma value:  0.53</code></pre>
+</div>
+<div class="cell-output cell-output-stderr">
+<pre><code>Likelihood value: 97.9501354713587</code></pre>
+</div>
+<div class="cell-output cell-output-stderr">
+<pre><code>Sigma value:  0.45</code></pre>
+</div>
+<div class="cell-output cell-output-stderr">
+<pre><code>Likelihood value: 94.3725160205627</code></pre>
+</div>
+<div class="cell-output cell-output-stderr">
+<pre><code>Sigma value:  0.37</code></pre>
+</div>
+<div class="cell-output cell-output-stderr">
+<pre><code>Likelihood value: 90.4213192913567</code></pre>
+</div>
+<div class="cell-output cell-output-stderr">
+<pre><code>Sigma value:  0.29</code></pre>
+</div>
+<div class="cell-output cell-output-stderr">
+<pre><code>Likelihood value: 86.0445136616334</code></pre>
+</div>
+<div class="cell-output cell-output-stderr">
+<pre><code>Sigma value:  0.21</code></pre>
+</div>
+</div>
+</section>
+<section id="interpretation" class="level3">
+<h3 class="anchored" data-anchor-id="interpretation">Interpretation</h3>
+<p>The moment of truth:</p>
+<div class="cell">
+<div class="sourceCode cell-code" id="cb38"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb38-1"><a href="#cb38-1" aria-hidden="true" tabindex="-1"></a>myRCTD<span class="sc">@</span>results<span class="sc">$</span>weights</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<div class="cell-output cell-output-stdout">
+<pre><code>4 x 2 sparse Matrix of class "dgCMatrix"
+           typeA     typeB
+spot1 0.15105219 0.8358883
+spot2 0.05609608 0.9349949
+spot3 0.34829858 0.6393917
+spot4 0.15169237 0.8395874</code></pre>
+</div>
+</div>
+<p>Clearly, these weights do not correspond to the fraction of cells in a spot that are of each cell type. If so, the matrix would have been equal to</p>
+<div class="cell">
+<div class="sourceCode cell-code" id="cb40"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb40-1"><a href="#cb40-1" aria-hidden="true" tabindex="-1"></a>fractions <span class="ot">&lt;-</span> tibble<span class="sc">::</span><span class="fu">tribble</span>(</span>
+<span id="cb40-2"><a href="#cb40-2" aria-hidden="true" tabindex="-1"></a>  <span class="sc">~</span>spot, <span class="sc">~</span>typeA, <span class="sc">~</span>typeB,</span>
+<span id="cb40-3"><a href="#cb40-3" aria-hidden="true" tabindex="-1"></a>  <span class="st">"spot1"</span>, <span class="fl">0.5</span>, <span class="fl">0.5</span>,</span>
+<span id="cb40-4"><a href="#cb40-4" aria-hidden="true" tabindex="-1"></a>  <span class="st">"spot2"</span>, <span class="fl">0.25</span>, <span class="fl">0.75</span>,</span>
+<span id="cb40-5"><a href="#cb40-5" aria-hidden="true" tabindex="-1"></a>  <span class="st">"spot3"</span>, <span class="fl">0.75</span>, <span class="fl">0.25</span>,</span>
+<span id="cb40-6"><a href="#cb40-6" aria-hidden="true" tabindex="-1"></a>  <span class="st">"spot4"</span>, <span class="fl">0.5</span>, <span class="fl">0.5</span></span>
+<span id="cb40-7"><a href="#cb40-7" aria-hidden="true" tabindex="-1"></a>) <span class="sc">|&gt;</span></span>
+<span id="cb40-8"><a href="#cb40-8" aria-hidden="true" tabindex="-1"></a>  tibble<span class="sc">::</span><span class="fu">column_to_rownames</span>(<span class="st">"spot"</span>) <span class="sc">|&gt;</span></span>
+<span id="cb40-9"><a href="#cb40-9" aria-hidden="true" tabindex="-1"></a>  <span class="fu">as.matrix</span>()</span>
+<span id="cb40-10"><a href="#cb40-10" aria-hidden="true" tabindex="-1"></a>fractions</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<div class="cell-output cell-output-stdout">
+<pre><code>      typeA typeB
+spot1  0.50  0.50
+spot2  0.25  0.75
+spot3  0.75  0.25
+spot4  0.50  0.50</code></pre>
+</div>
+</div>
+<p>Instead, the weights represent the proportion of RNA molecules in a spot that originated in cells of each type.</p>
+<div class="cell">
+<div class="sourceCode cell-code" id="cb42"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb42-1"><a href="#cb42-1" aria-hidden="true" tabindex="-1"></a>molsA <span class="ot">&lt;-</span> <span class="fu">sum</span>(typeA)</span>
+<span id="cb42-2"><a href="#cb42-2" aria-hidden="true" tabindex="-1"></a>molsB <span class="ot">&lt;-</span> <span class="fu">sum</span>(typeB)</span>
+<span id="cb42-3"><a href="#cb42-3" aria-hidden="true" tabindex="-1"></a>proportions <span class="ot">&lt;-</span> <span class="fu">matrix</span>(</span>
+<span id="cb42-4"><a href="#cb42-4" aria-hidden="true" tabindex="-1"></a>  <span class="fu">c</span>(</span>
+<span id="cb42-5"><a href="#cb42-5" aria-hidden="true" tabindex="-1"></a>    <span class="fu">c</span>(molsA, molsB)<span class="sc">/</span>(molsA <span class="sc">+</span> molsB),</span>
+<span id="cb42-6"><a href="#cb42-6" aria-hidden="true" tabindex="-1"></a>    <span class="fu">c</span>(molsA, <span class="dv">3</span><span class="sc">*</span>molsB)<span class="sc">/</span>(molsA <span class="sc">+</span> <span class="dv">3</span><span class="sc">*</span>molsB), </span>
+<span id="cb42-7"><a href="#cb42-7" aria-hidden="true" tabindex="-1"></a>    <span class="fu">c</span>(<span class="dv">3</span><span class="sc">*</span>molsA, molsB)<span class="sc">/</span>(<span class="dv">3</span><span class="sc">*</span>molsA <span class="sc">+</span> molsB),</span>
+<span id="cb42-8"><a href="#cb42-8" aria-hidden="true" tabindex="-1"></a>    <span class="fu">c</span>(<span class="dv">3</span><span class="sc">*</span>molsA, <span class="dv">3</span><span class="sc">*</span>molsB)<span class="sc">/</span>(<span class="dv">3</span><span class="sc">*</span>molsA <span class="sc">+</span> <span class="dv">3</span><span class="sc">*</span>molsB)</span>
+<span id="cb42-9"><a href="#cb42-9" aria-hidden="true" tabindex="-1"></a>  ),</span>
+<span id="cb42-10"><a href="#cb42-10" aria-hidden="true" tabindex="-1"></a>  <span class="at">ncol =</span> <span class="dv">2</span>,</span>
+<span id="cb42-11"><a href="#cb42-11" aria-hidden="true" tabindex="-1"></a>  <span class="at">byrow =</span> <span class="cn">TRUE</span>,</span>
+<span id="cb42-12"><a href="#cb42-12" aria-hidden="true" tabindex="-1"></a>  <span class="at">dimnames =</span> <span class="fu">list</span>(</span>
+<span id="cb42-13"><a href="#cb42-13" aria-hidden="true" tabindex="-1"></a>    <span class="fu">c</span>(<span class="st">"spot1"</span>, <span class="st">"spot2"</span>, <span class="st">"spot3"</span>, <span class="st">"spot4"</span>),</span>
+<span id="cb42-14"><a href="#cb42-14" aria-hidden="true" tabindex="-1"></a>    <span class="fu">c</span>(<span class="st">"typeA"</span>, <span class="st">"typeB"</span>)</span>
+<span id="cb42-15"><a href="#cb42-15" aria-hidden="true" tabindex="-1"></a>  )</span>
+<span id="cb42-16"><a href="#cb42-16" aria-hidden="true" tabindex="-1"></a>)</span>
+<span id="cb42-17"><a href="#cb42-17" aria-hidden="true" tabindex="-1"></a>proportions</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<div class="cell-output cell-output-stdout">
+<pre><code>           typeA     typeB
+spot1 0.15384615 0.8461538
+spot2 0.05714286 0.9428571
+spot3 0.35294118 0.6470588
+spot4 0.15384615 0.8461538</code></pre>
+</div>
+</div>
+<p>As a final note, the weights were very close to being normalised already, but for completion’s sake:</p>
+<div class="cell">
+<div class="sourceCode cell-code" id="cb44"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb44-1"><a href="#cb44-1" aria-hidden="true" tabindex="-1"></a><span class="fu">normalize_weights</span>(myRCTD<span class="sc">@</span>results<span class="sc">$</span>weights)</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<div class="cell-output cell-output-stdout">
+<pre><code>4 x 2 Matrix of class "dgeMatrix"
+           typeA     typeB
+spot1 0.15305096 0.8469490
+spot2 0.05660033 0.9433997
+spot3 0.35263948 0.6473605
+spot4 0.15302681 0.8469732</code></pre>
+</div>
+</div>
+<div class="cell">
+<div class="sourceCode cell-code" id="cb46"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb46-1"><a href="#cb46-1" aria-hidden="true" tabindex="-1"></a><span class="fu">sessionInfo</span>()</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<div class="cell-output cell-output-stdout">
+<pre><code>R version 4.3.2 (2023-10-31 ucrt)
+Platform: x86_64-w64-mingw32/x64 (64-bit)
+Running under: Windows 10 x64 (build 19045)
+
+Matrix products: default
+
+
+locale:
+[1] LC_COLLATE=English_United Kingdom.utf8 
+[2] LC_CTYPE=English_United Kingdom.utf8   
+[3] LC_MONETARY=English_United Kingdom.utf8
+[4] LC_NUMERIC=C                           
+[5] LC_TIME=English_United Kingdom.utf8    
+
+time zone: Europe/London
+tzcode source: internal
+
+attached base packages:
+[1] stats     graphics  grDevices datasets  utils     methods   base     
+
+other attached packages:
+[1] spacexr_2.2.1
+
+loaded via a namespace (and not attached):
+ [1] vctrs_0.6.5       doParallel_1.0.17 cli_3.6.2         knitr_1.45       
+ [5] rlang_1.1.3       xfun_0.41         renv_1.0.3        jsonlite_1.8.8   
+ [9] glue_1.7.0        htmltools_0.5.7   fansi_1.0.6       rmarkdown_2.25   
+[13] quadprog_1.5-8    grid_4.3.2        evaluate_0.23     tibble_3.2.1     
+[17] fastmap_1.1.1     yaml_2.3.8        foreach_1.5.2     lifecycle_1.0.4  
+[21] compiler_4.3.2    codetools_0.2-19  pkgconfig_2.0.3   lattice_0.21-9   
+[25] digest_0.6.34     utf8_1.2.4        pillar_1.9.0      parallel_4.3.2   
+[29] magrittr_2.0.3    Matrix_1.6-1.1    tools_4.3.2       iterators_1.0.14 </code></pre>
+</div>
+</div>
+</section>
+
+</main>
+<!-- /main column -->
+<script id="quarto-html-after-body" type="application/javascript">
+window.document.addEventListener("DOMContentLoaded", function (event) {
+  const toggleBodyColorMode = (bsSheetEl) => {
+    const mode = bsSheetEl.getAttribute("data-mode");
+    const bodyEl = window.document.querySelector("body");
+    if (mode === "dark") {
+      bodyEl.classList.add("quarto-dark");
+      bodyEl.classList.remove("quarto-light");
+    } else {
+      bodyEl.classList.add("quarto-light");
+      bodyEl.classList.remove("quarto-dark");
+    }
+  }
+  const toggleBodyColorPrimary = () => {
+    const bsSheetEl = window.document.querySelector("link#quarto-bootstrap");
+    if (bsSheetEl) {
+      toggleBodyColorMode(bsSheetEl);
+    }
+  }
+  toggleBodyColorPrimary();  
+  const icon = "";
+  const anchorJS = new window.AnchorJS();
+  anchorJS.options = {
+    placement: 'right',
+    icon: icon
+  };
+  anchorJS.add('.anchored');
+  const isCodeAnnotation = (el) => {
+    for (const clz of el.classList) {
+      if (clz.startsWith('code-annotation-')) {                     
+        return true;
+      }
+    }
+    return false;
+  }
+  const clipboard = new window.ClipboardJS('.code-copy-button', {
+    text: function(trigger) {
+      const codeEl = trigger.previousElementSibling.cloneNode(true);
+      for (const childEl of codeEl.children) {
+        if (isCodeAnnotation(childEl)) {
+          childEl.remove();
+        }
+      }
+      return codeEl.innerText;
+    }
+  });
+  clipboard.on('success', function(e) {
+    // button target
+    const button = e.trigger;
+    // don't keep focus
+    button.blur();
+    // flash "checked"
+    button.classList.add('code-copy-button-checked');
+    var currentTitle = button.getAttribute("title");
+    button.setAttribute("title", "Copied!");
+    let tooltip;
+    if (window.bootstrap) {
+      button.setAttribute("data-bs-toggle", "tooltip");
+      button.setAttribute("data-bs-placement", "left");
+      button.setAttribute("data-bs-title", "Copied!");
+      tooltip = new bootstrap.Tooltip(button, 
+        { trigger: "manual", 
+          customClass: "code-copy-button-tooltip",
+          offset: [0, -8]});
+      tooltip.show();    
+    }
+    setTimeout(function() {
+      if (tooltip) {
+        tooltip.hide();
+        button.removeAttribute("data-bs-title");
+        button.removeAttribute("data-bs-toggle");
+        button.removeAttribute("data-bs-placement");
+      }
+      button.setAttribute("title", currentTitle);
+      button.classList.remove('code-copy-button-checked');
+    }, 1000);
+    // clear code selection
+    e.clearSelection();
+  });
+  function tippyHover(el, contentFn) {
+    const config = {
+      allowHTML: true,
+      content: contentFn,
+      maxWidth: 500,
+      delay: 100,
+      arrow: false,
+      appendTo: function(el) {
+          return el.parentElement;
+      },
+      interactive: true,
+      interactiveBorder: 10,
+      theme: 'quarto',
+      placement: 'bottom-start'
+    };
+    window.tippy(el, config); 
+  }
+  const noterefs = window.document.querySelectorAll('a[role="doc-noteref"]');
+  for (var i=0; i<noterefs.length; i++) {
+    const ref = noterefs[i];
+    tippyHover(ref, function() {
+      // use id or data attribute instead here
+      let href = ref.getAttribute('data-footnote-href') || ref.getAttribute('href');
+      try { href = new URL(href).hash; } catch {}
+      const id = href.replace(/^#\/?/, "");
+      const note = window.document.getElementById(id);
+      return note.innerHTML;
+    });
+  }
+      let selectedAnnoteEl;
+      const selectorForAnnotation = ( cell, annotation) => {
+        let cellAttr = 'data-code-cell="' + cell + '"';
+        let lineAttr = 'data-code-annotation="' +  annotation + '"';
+        const selector = 'span[' + cellAttr + '][' + lineAttr + ']';
+        return selector;
+      }
+      const selectCodeLines = (annoteEl) => {
+        const doc = window.document;
+        const targetCell = annoteEl.getAttribute("data-target-cell");
+        const targetAnnotation = annoteEl.getAttribute("data-target-annotation");
+        const annoteSpan = window.document.querySelector(selectorForAnnotation(targetCell, targetAnnotation));
+        const lines = annoteSpan.getAttribute("data-code-lines").split(",");
+        const lineIds = lines.map((line) => {
+          return targetCell + "-" + line;
+        })
+        let top = null;
+        let height = null;
+        let parent = null;
+        if (lineIds.length > 0) {
+            //compute the position of the single el (top and bottom and make a div)
+            const el = window.document.getElementById(lineIds[0]);
+            top = el.offsetTop;
+            height = el.offsetHeight;
+            parent = el.parentElement.parentElement;
+          if (lineIds.length > 1) {
+            const lastEl = window.document.getElementById(lineIds[lineIds.length - 1]);
+            const bottom = lastEl.offsetTop + lastEl.offsetHeight;
+            height = bottom - top;
+          }
+          if (top !== null && height !== null && parent !== null) {
+            // cook up a div (if necessary) and position it 
+            let div = window.document.getElementById("code-annotation-line-highlight");
+            if (div === null) {
+              div = window.document.createElement("div");
+              div.setAttribute("id", "code-annotation-line-highlight");
+              div.style.position = 'absolute';
+              parent.appendChild(div);
+            }
+            div.style.top = top - 2 + "px";
+            div.style.height = height + 4 + "px";
+            let gutterDiv = window.document.getElementById("code-annotation-line-highlight-gutter");
+            if (gutterDiv === null) {
+              gutterDiv = window.document.createElement("div");
+              gutterDiv.setAttribute("id", "code-annotation-line-highlight-gutter");
+              gutterDiv.style.position = 'absolute';
+              const codeCell = window.document.getElementById(targetCell);
+              const gutter = codeCell.querySelector('.code-annotation-gutter');
+              gutter.appendChild(gutterDiv);
+            }
+            gutterDiv.style.top = top - 2 + "px";
+            gutterDiv.style.height = height + 4 + "px";
+          }
+          selectedAnnoteEl = annoteEl;
+        }
+      };
+      const unselectCodeLines = () => {
+        const elementsIds = ["code-annotation-line-highlight", "code-annotation-line-highlight-gutter"];
+        elementsIds.forEach((elId) => {
+          const div = window.document.getElementById(elId);
+          if (div) {
+            div.remove();
+          }
+        });
+        selectedAnnoteEl = undefined;
+      };
+      // Attach click handler to the DT
+      const annoteDls = window.document.querySelectorAll('dt[data-target-cell]');
+      for (const annoteDlNode of annoteDls) {
+        annoteDlNode.addEventListener('click', (event) => {
+          const clickedEl = event.target;
+          if (clickedEl !== selectedAnnoteEl) {
+            unselectCodeLines();
+            const activeEl = window.document.querySelector('dt[data-target-cell].code-annotation-active');
+            if (activeEl) {
+              activeEl.classList.remove('code-annotation-active');
+            }
+            selectCodeLines(clickedEl);
+            clickedEl.classList.add('code-annotation-active');
+          } else {
+            // Unselect the line
+            unselectCodeLines();
+            clickedEl.classList.remove('code-annotation-active');
+          }
+        });
+      }
+  const findCites = (el) => {
+    const parentEl = el.parentElement;
+    if (parentEl) {
+      const cites = parentEl.dataset.cites;
+      if (cites) {
+        return {
+          el,
+          cites: cites.split(' ')
+        };
+      } else {
+        return findCites(el.parentElement)
+      }
+    } else {
+      return undefined;
+    }
+  };
+  var bibliorefs = window.document.querySelectorAll('a[role="doc-biblioref"]');
+  for (var i=0; i<bibliorefs.length; i++) {
+    const ref = bibliorefs[i];
+    const citeInfo = findCites(ref);
+    if (citeInfo) {
+      tippyHover(citeInfo.el, function() {
+        var popup = window.document.createElement('div');
+        citeInfo.cites.forEach(function(cite) {
+          var citeDiv = window.document.createElement('div');
+          citeDiv.classList.add('hanging-indent');
+          citeDiv.classList.add('csl-entry');
+          var biblioDiv = window.document.getElementById('ref-' + cite);
+          if (biblioDiv) {
+            citeDiv.innerHTML = biblioDiv.innerHTML;
+          }
+          popup.appendChild(citeDiv);
+        });
+        return popup.innerHTML;
+      });
+    }
+  }
+});
+</script>
+</div> <!-- /content -->
+
+
+
+</body></html>

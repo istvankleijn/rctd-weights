@@ -1,0 +1,177 @@
+---
+title: "Interpreting RCTD weights"
+author: "Istvan Kleijn"
+date: 2024-02-26
+format:
+  html: default
+---
+
+In this document, we run spacexr's RCTD algorithm on simple synthetic data to infer that the `weights` matrix should be interpreted as the proportion of RNA molecules originating from each cell type in each spot, rather than the fraction of cells assigned to each cell type.
+
+```{r load-packages}
+library(spacexr)
+```
+
+### Create mock cell types
+
+As the first step, we create two mock cell types with corresponding "gene" expression. RCTD requires at least 10 differentially expressed genes. I choose to have five genes specific to each of two cell types A and B, and five constitutively expressed genes that have equal counts across each cell. Crucially, we choose cell type B to have a higher total expression than cell type A, because its markers are more highly expressed.
+
+```{r cell-types}
+typeA <- c(
+  "a1" = 1,
+  "a2" = 2,
+  "a3" = 3,
+  "a4" = 4,
+  "a5" = 5,
+  "b1" = 0,
+  "b2" = 0,
+  "b3" = 0,
+  "b4" = 0,
+  "b5" = 0,
+  "c1" = 1,
+  "c2" = 2,
+  "c3" = 3,
+  "c4" = 4,
+  "c5" = 5
+)
+typeB <- c(
+  "a1" = 0,
+  "a2" = 0,
+  "a3" = 0,
+  "a4" = 0,
+  "a5" = 0,
+  "b1" = 10,
+  "b2" = 20,
+  "b3" = 30,
+  "b4" = 40,
+  "b5" = 50,
+  "c1" = 1,
+  "c2" = 2,
+  "c3" = 3,
+  "c4" = 4,
+  "c5" = 5
+)
+```
+
+### Create RCTD objects
+
+First we create the RCTD reference. At some point down the line, RCTD errors with only one cell per cell type in the reference, so the reference contains two identical cells of both cell types.
+
+```{r reference}
+reference_counts <- data.frame(
+  cell1 = typeA, cell2 = typeA, cell3 = typeB, cell4 = typeB
+) |>
+  as.matrix()
+reference_types <- factor(
+  c(
+    "cell1" = "typeA", "cell2" = "typeA",
+    "cell3" = "typeB", "cell4" = "typeB"
+  ),
+  levels = c("typeA", "typeB")
+)
+reference_nUMI <- colSums(reference_counts)
+reference <- spacexr::Reference(
+  reference_counts,
+  reference_types,
+  reference_nUMI,
+  min_UMI = 10
+)
+```
+
+Next, we mock up some spatial data. We let spot 1 contain 1 cell of type A and 1 cell of type B. Spot 2 contains 1 cell A and 3 cells of type B, spot 3 contains 3 cells of type A and one of type B, and spot 4 contains 3 cells of each type.
+
+```{r spatial-data}
+spatial_coords <- tibble::tribble(
+  ~spot, ~x, ~y,
+  "spot1", 0, 0,
+  "spot2", 1, 0,
+  "spot3", 0, 1,
+  "spot4", 1, 1
+) |>
+  tibble::column_to_rownames("spot")
+spatial_counts <- data.frame(
+  spot1 = typeA + typeB,
+  spot2 = typeA + 3 * typeB,
+  spot3 = 3 * typeA + typeB,
+  spot4 = 3 * typeA + 3 * typeB
+) |>
+  as.matrix()
+nUMI <- colSums(spatial_counts)
+puck <- SpatialRNA(spatial_coords, spatial_counts, nUMI)
+```
+
+Finally, we create the RCTD object itself from the mock reference and spatial data. We have to provide a few parameters to enable the small size of the mock data.
+
+```{r rctd-object}
+myRCTD <- create.RCTD(
+  puck, reference,
+  max_cores = 1,
+  counts_MIN = 1,
+  CELL_MIN_INSTANCE = 1
+  )
+```
+
+Note that it finds 10 marker genes for typeA, which means that the constitutively expressed genes are included. Indeed, their *relative* abundance is higher in cell type A than in cell type B.
+
+### Run RCTD to find cell type fractions
+
+Now we finally run the RCTD algorithm to get cell type proportions. I always use full mode on my own data so that is what I do here. For this mock data using doublet mode would be appropriate (it has the same interpretation).
+
+```{r run-rctd}
+myRCTD <- run.RCTD(myRCTD, doublet_mode = "full")
+```
+
+### Interpretation
+
+The moment of truth:
+
+```{r weights}
+myRCTD@results$weights
+```
+
+Clearly, these weights do not correspond to the fraction of cells in a spot that are of each cell type. If so, the matrix would have been equal to
+
+```{r cell-fractions}
+fractions <- tibble::tribble(
+  ~spot, ~typeA, ~typeB,
+  "spot1", 0.5, 0.5,
+  "spot2", 0.25, 0.75,
+  "spot3", 0.75, 0.25,
+  "spot4", 0.5, 0.5
+) |>
+  tibble::column_to_rownames("spot") |>
+  as.matrix()
+fractions
+```
+
+Instead, the weights represent the proportion of RNA molecules in a spot that originated in cells of each type.
+
+```{r rna-proportions}
+molsA <- sum(typeA)
+molsB <- sum(typeB)
+proportions <- matrix(
+  c(
+    c(molsA, molsB)/(molsA + molsB),
+    c(molsA, 3*molsB)/(molsA + 3*molsB), 
+    c(3*molsA, molsB)/(3*molsA + molsB),
+    c(3*molsA, 3*molsB)/(3*molsA + 3*molsB)
+  ),
+  ncol = 2,
+  byrow = TRUE,
+  dimnames = list(
+    c("spot1", "spot2", "spot3", "spot4"),
+    c("typeA", "typeB")
+  )
+)
+proportions
+```
+
+As a final note, the weights were very close to being normalised already, but for completion's sake:
+
+```{r normalized-weights}
+normalize_weights(myRCTD@results$weights)
+```
+
+```{r sessioninfo}
+sessionInfo()
+```
