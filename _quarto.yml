@@ -1,5 +1,6 @@
 project:
   title: "rctd-weights"
+  type: website
+  output-dir: docs
 
 editor: visual
-
